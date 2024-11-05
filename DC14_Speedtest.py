@@ -319,13 +319,17 @@ def MCMC_Fit():
     popt = opline(galaxy_name, False)[0]
     pos = [popt + 1e-4*np.random.randn(ndim) for i in range(nwalkers)]
     if __name__ == '__main__':
-        with Pool(2) as pool:
+        with Pool(8) as pool:
             print("X")
             sampler = emcee.EnsembleSampler(nwalkers, ndim, logprob, pool = pool, args=(r_list, Vtot_data, Verr), a=3)#, threads=20))
             print("X")
-            samples = sampler.run_mcmc(pos, 10000, progress=True)
-    samples = sampler.chain[:, 1000:, :].reshape((-1, ndim))
-    sampler_chain = sampler.get_chain(discard=1000)
+            samples = sampler.run_mcmc(pos, 1000, progress=True)
+            # samples = sampler.run_mcmc(pos, 10000, progress=True)
+
+    samples = sampler.chain[:, 100:, :].reshape((-1, ndim))
+    sampler_chain = sampler.get_chain(discard=100)
+    # samples = sampler.chain[:, 1000:, :].reshape((-1, ndim))
+    # sampler_chain = sampler.get_chain(discard=1000)
     labels = ["$\\log_{10}(M_{halo})$", "$c_{vir}$", "$\\Upsilon_{*}$"]
     plt.clf()
     fig, axes = plt.subplots(ndim, sharex=True, figsize=(8, 9))

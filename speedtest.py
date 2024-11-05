@@ -22,11 +22,12 @@ os.environ["OMP_NUM_THREADS"] = "1"
 import matplotlib.ticker as ticker
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
 plt.rc('font', family='serif')
-from scipy.optimize import brentq,minimize
+from scipy.optimize import brentq, minimize
 from multiprocessing import Pool
 
 from typing import Optional
 from numpy.typing import NDArray
+from numpy import float32, float64
 
 
 ###############################################################################
@@ -35,10 +36,17 @@ from numpy.typing import NDArray
 
 # Read in SPARC rotation curve data
 names = np.loadtxt(
-    "rotationCurvesSPARC.txt", dtype=str, unpack=True, usecols=(0)
+    "rotationCurvesSPARC.txt", 
+    dtype=str, 
+    unpack=True, 
+    usecols=(0),
 )
-R, Vobs, e_Vobs, Vg, Vs, Vb = np.loadtxt("rotationCurvesSPARC.txt", dtype=float, unpack=True, usecols=(
-    2, 3, 4, 5, 6, 7))  # Radial points, and individual rotational velocity components
+R, Vobs, e_Vobs, Vg, Vs, Vb = np.loadtxt(
+    "rotationCurvesSPARC.txt", 
+    dtype=float, 
+    unpack=True, 
+    usecols=(2, 3, 4, 5, 6, 7),
+)  # Radial points, and individual rotational velocity components
 
 
 def SPARC1(galaxy_names):
@@ -55,8 +63,10 @@ def SPARC1(galaxy_names):
     Q = np.array([])
     Inc = np.array([])
     r0 = np.array([])
+
     for i in range(len(galaxy_names)):
         galaxy_name = galaxy_names[i]
+
         for j in range(len(names)):
             if galaxy_name == names[j]:
                 Inc = np.append(Inc, I[j])
@@ -66,6 +76,7 @@ def SPARC1(galaxy_names):
                 HImass = np.append(HImass, MHI[j])
                 Q = np.append(Q, QF[j])
                 r0 = np.append(r0, (r[j]))
+    
     return Inc, Lum, e_Lum, r0, SBright, HImass, Q
 
 
@@ -73,12 +84,15 @@ def SPARC2(galaxy_name):
     # extract SPARC rotation curve data
     # returns:
     # r_list = radial points, Vtot_data = total velocity, Verr = tota velocity uncertainty, Vgas = gas velocity, Vstar = stellar velocity, Vbulge = bulge velocity
+    num_galaxy_names: int = len(names)
+    
     r_list = np.array([])
     Vtot_data = np.array([])
     Verr = np.array([])
     Vgas = np.array([])
     Vstar = np.array([])
     Vbulge = np.array([])
+
     for i in range(len(names)):
         if str(names[i]) == galaxy_name:
             r_list = np.append(r_list, R[i])
@@ -87,6 +101,7 @@ def SPARC2(galaxy_name):
             Vgas = np.append(Vgas, Vg[i])
             Vstar = np.append(Vstar, Vs[i])
             Vbulge = np.append(Vbulge, Vb[i])
+
     return r_list, Vtot_data, Verr, Vgas, Vstar, Vbulge
 
 
@@ -104,12 +119,12 @@ def RC(galaxy_names):
 
     for idx, galaxy_name in enumerate(galaxy_names):
         r, Vdata, Ve, Vg, Vs, Vb = SPARC2(galaxy_name)
-        r_list[idx].append(r)
-        Vtot_data[idx].append(Vdata)
-        Verr[idx].append(Ve)
-        Vgas[idx].append(Vg)
-        Vstar[idx].append(Vs)
-        Vbulge[idx].append(Vb)
+        r_list[idx] = [r]
+        Vtot_data[idx] = [Vdata]
+        Verr[idx] = [Ve]
+        Vgas[idx] = [Vg]
+        Vstar[idx] = [Vs]
+        Vbulge[idx] = [Vb]
 
     return r_list, Vtot_data, Verr, Vgas, Vstar, Vbulge
 
@@ -171,38 +186,53 @@ c_lim = np.array([1, 100])  # concentration prior
 ## THEORETICAL MASS AND VELOCITY CURVES ##
 ###############################################################################
 
-def Rvir_calc(Mhalo_log):
-    # Virial radius of the galaxy for a NFW profile.
-    HH = 0.7  # Scaled Hubble constant in (km/s)/kpc
-    rho_c = (3 * (HH**2)) / (8 * np.pi * G)  # Critical density
-    k = (4*np.pi) / 3
-    delta = 18*np.pi**2  # redshipt dependent critical density for z=0 #Bryan+Norman 1997 et al
-    # Virial radius in kpc
-    Rvir_result = np.cbrt(((10 ** Mhalo_log) / (rho_c * delta * k)))
-    return Rvir_result
+# SWM 5/11/24: Take the constant terms and calculations out of the function,
+# and do them once so we can refer to them later to save time.
+# Not sure if this is necessary -  won't really be if this isn't called in the MCMC or a fitter
+CONST_HH: float = 0.7  # Scaled Hubble constant in (km/s)/kpc
+CONST_RHO: float = (3 * (HH**2)) / (8 * np.pi * G)  # Critical density
+CONST_K: float = (4*np.pi) / 3
+CONST_DELTA: float = 18*np.pi**2  # redshift dependent critical density for z=0 (Bryan+Norman 1997 et al)
+
+CONST_VIRIAL_RADIUS_DENOMINATOR: float = CONST_RHO * CONST_DELTA * CONST_K
+
+
+def calculate_virial_radius_NFW(Mhalo_log):
+    """
+    Virial radius of the galaxy for a NFW profile.
+
+    :param Mhalo_log: The log mass of the halo (in M_☉?)
+    :return: The virial radius of the galaxy in kiloparsecs
+    """
+    return np.cbrt(((10 ** Mhalo_log) / CONST_VIRIAL_RADIUS_DENOMINATOR))
 
 
 def Mdm_DC14_calc(galaxy_name, r_input, Mhalo_log, c, MLs):
     # Calculation for the log of the dark matter halo mass out to the last radial point for the DC14 model
     Mdm_result = []
-    Rvir = Rvir_calc(Mhalo_log)  # Virial radius
+    Rvir = calculate_virial_radius_NFW(Mhalo_log)  # Virial radius
+    
     X = np.log10(MLs*L*(10**9)) - Mhalo_log  # Extrapolation factor
     if X < -4.1:
         X = -4.1  # extrapolation beyond accurate DC14 range
     if X > -1.3:
         X = -1.3
+    
     # transition parameter between the inner slope and outer slope
     alpha = 2.94 - np.log10((10**(X+2.33))**(-1.08) + (10**(X+2.33))**(2.29))
     beta = 4.23 + (1.34 * X) + (0.26 * (X**2))  # outer slope
     gamma = -0.06 + np.log10((10**(X+2.56))**(-0.68) + (10**(X+2.56)))  # inner slope
+    
     # Katz say 0.00001 is a better fit than DC's 0.00003
     c_sph = c * (1 + (0.00001 * np.exp(3.4 * (X + 4.5))))
     rm_2 = Rvir / c_sph
     r_s = rm_2 / (((2 - gamma) / (beta - 2))**(1 / alpha))  # Scale radius
     temp1 = quad(lambda x: ((x**2) / (((x / r_s)**gamma) *
                  (1+(x / r_s)**alpha)**((beta - gamma) / alpha))), 0, Rvir)
+    
     # Ps (scale density) where M(Rvir) = Mhalo. From Di Cintio et al 2014.
     Ps = (10 ** Mhalo_log) / (4 * math.pi * temp1[0])
+
     for i in range(len(r_input)):
         r = r_input[i]
         temp1 = quad(lambda x: ((x**2) / (((x / r_s)**gamma) * (1+(x / r_s)**alpha)**((beta - gamma) / alpha))), 0, r)
@@ -220,19 +250,28 @@ def Vdm_calc(galaxy_name, r_input, Mhalo_log, c, MLs, r_c, n, alpha):
 
 def Vtot_calc(r_input, Mhalo_log, c, MLs):
     # Calculates the total rotation curve for NFW and DC14
-    Vtot = []
     Vdm = (Vdm_calc(galaxy_name, r_input, Mhalo_log, c, MLs, 0,  0, 0))
+    Vtot: NDArray = np.zeros(len(Vdm))
+
     for i in range(len(Vdm)):
-        Vtot.append(np.sqrt(Vdm[i]**2 + MLs*Vstar[i]**2 + np.sign(Vgas[i])*Vgas[i]**2))
+        Vtot[i] = np.sqrt(Vdm[i]**2 + MLs*Vstar[i]**2 + np.sign(Vgas[i]) * Vgas[i]**2)
+
     return Vtot
 
 
-def res(Vdata, Vcalc):
-    # Residuals in velocity calculations at each radii
-    res = []
-    for i in range(len(Vdata)):
-        res.append(Vcalc[i] - Vdata[i])
-    return res
+def get_velocity_residuals(
+        velocity_observed: NDArray, 
+        velocity_calculated: NDArray
+) -> NDArray:
+    """
+    Residuals in velocity calculations at each radii
+
+    :param velocity_observed: Observed velocities at each radius (units ???)
+    :param velocity_calculated: Calculated best fit model for velocities at each radius (units ???)
+    :return: The residuals of the model fit to the data (units ???)
+    """
+    # SWM 5/11/24: Assuming these are numpy arrays, we can directly subtract them elementwise
+    return velocity_calculated - velocity_observed
 
 
 ###############################################################################
@@ -252,11 +291,25 @@ def opline(galaxy_name, plot=True):
     i = np.where(galaxy_name == galaxy_names)
     # Luminosity of given galaxy as a global variable in DC14 halo mass calculation
     L = Lum[i]
+
     if model == 'NFW' or model == 'DC14':
-        popt, pcov = op.curve_fit(Vtot_calc, r_list, Vtot_data, sigma=Verr, p0=(11, 10, 0.5), bounds=(
-            [Mhalo_log_lim[0], c_lim[0], MLs_lim[0]], [Mhalo_log_lim[1], c_lim[1], MLs_lim[1]]), max_nfev=20000, method='trf')
-        Res = res(Vtot_data, Vtot_calc(r_list, *popt))
-# plots rotation curves if plot=True:
+        popt, pcov = op.curve_fit(
+            Vtot_calc, r_list, Vtot_data, 
+            sigma=Verr, 
+            p0=(11, 10, 0.5), 
+            bounds=(
+                [Mhalo_log_lim[0], c_lim[0], MLs_lim[0]], 
+                [Mhalo_log_lim[1], c_lim[1], MLs_lim[1]],
+            ), 
+            max_nfev=20000, 
+            method='trf',
+        )
+        
+        Res = get_velocity_residuals(
+            Vtot_data, Vtot_calc(r_list, *popt)
+        )
+
+    # plots rotation curves if plot=True:
     if plot == True:
         if model == 'NFW' or model == 'DC14':
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 9),
@@ -303,12 +356,25 @@ def get_log_likeihood(theta, r_input, Vtot_data, Verr):
     :param Verr: ???
     :returns: ???
     """
-    if model == 'NFW' or model == 'DC14':
-        Mhalo_log, c, MLs = theta[0], theta[1], theta[2]
-        modelV = Vtot_calc(r_list, Mhalo_log, c, MLs)
+    # SWM 5/11/25: If the function should be different for different models, 
+    # then we probably want to have different *functions*, 
+    # not a switch within the same function that we keep checking every call.
+    # if model == 'NFW' or model == 'DC14':
+    
+    Mhalo_log, c, MLs = theta[0], theta[1], theta[2]
+    modelV = Vtot_calc(r_list, Mhalo_log, c, MLs)
     return -0.5*(np.sum(np.power(Vtot_data-modelV, 2) * np.divide(1.0, np.power(Verr, 2))))
 
 'Select the correct set of priors:'
+
+
+# SWM 5/11/24: Logs and square roots are expensive, 
+# so we take the ones that don't change out, do them once, and keep them as a constant
+CONST_MU: float = np.log(0.5**2 / np.sqrt(0.5**2 + (0.11)**2))
+CONST_SIGMA: float = np.sqrt(np.log(1 + ((0.11)**2)/(0.5)**2))  # McGaugh 2016
+
+CONST_PRIOR_LOG_DENOMINATOR: float = np.sqrt(2 * np.pi) * CONST_SIGMA  # SWM 5/11/24: I'd rename this to something physically or mathematically meaningful if possible
+CONST_PRIOR_SUBTRACT_DENOMINATOR: float = 2 * CONST_SIGMA**2           # SWM 5/11/24: Same as above!
 
 
 def get_log_prior(theta):
@@ -319,13 +385,15 @@ def get_log_prior(theta):
     :returns: ??? if the log halo mass, ??? and ??? are between the global limits, or -∞ if not.
     """
     # Flat priors on all parameters with a log normal prior on mass-to-light ratio given by P.Li et al 2019
-    if model == 'NFW' or model == 'DC14':
-        Mhalo_log, c, MLs = theta
-        if Mhalo_log_lim[0] < Mhalo_log < Mhalo_log_lim[1] and MLs_lim[0] < MLs < MLs_lim[1] and c_lim[0] < c < c_lim[1]:
-            # wiki log normal distribution page
-            mu = np.log(0.5**2 / np.sqrt(0.5**2 + (0.11)**2))
-            sigma = np.sqrt(np.log(1 + ((0.11)**2)/(0.5)**2))  # McGaugh 2016
-            return np.log(1.0/(np.sqrt(2*np.pi)*sigma*MLs))-0.5*(np.log(MLs)-mu)**2/(sigma**2)
+    Mhalo_log, c, MLs = theta
+
+    if Mhalo_log_lim[0] < Mhalo_log < Mhalo_log_lim[1] and MLs_lim[0] < MLs < MLs_lim[1] and c_lim[0] < c < c_lim[1]:
+        # wiki log normal distribution page
+        return np.log(
+            1.0 / (CONST_PRIOR_LOG_DENOMINATOR * MLs)
+        ) - (
+            np.log(MLs) - CONST_MU
+        )**2 / CONST_PRIOR_SUBTRACT_DENOMINATOR
 
     return -np.inf
 
@@ -341,16 +409,10 @@ def get_log_probability(theta, r_input, Vtot_input, Verr):
 
     :return: ??? if finite, or -∞ if not.
     """
-    # SWM 4/11/25: Tidied this up a bit - if I knew what theta was,
-    # might be able to tidy it a bit more.
-    # If the function should be different for different models,
-    # then we probably want to have different *functions*, 
-    # not a switch within the same function 
-
+    # SWM 4/11/25: If theta is already a numpy array, this should avoid converting it to a list and back
+    # Annoyingly, the [X:Y] notation *includes* element X, but only up to element Y-1 - so [0:3] is [0, 1, 2]
     log_prior = get_log_prior(
-        np.array(
-            [theta[0], theta[1], theta[2]]
-        )
+        np.array(theta[0:3])
     )
 
     if not np.isfinite(log_prior):
@@ -360,8 +422,8 @@ def get_log_probability(theta, r_input, Vtot_input, Verr):
 
 
 def perform_MCMC_fit(
-    output_figure_name: str,
-    num_threads: Optional[int] = None
+        output_figure_name: str,
+        num_threads: Optional[int] = None
 ):  
     """
     Performs MCMC fit of the galaxy data, and plots corner plots and chains for NFW and DC14 profile
@@ -382,12 +444,14 @@ def perform_MCMC_fit(
                 nwalkers, ndim, 
                 get_log_probability, 
                 pool=pool, 
-                args=(r_list, Vtot_data, Verr), a=3
-            )#, threads=20))
+                args=(r_list, Vtot_data, Verr),
+                a=3,
+            )
             print("perform_MCMC_fit: Declared sampler")
             
             samples = sampler.run_mcmc(
-                initial_state=pos, nsteps=10000, progress=True
+                initial_state=pos, nsteps=1000, progress=True
+                # initial_state=pos, nsteps=10000, progress=True
             )
 
     else:
@@ -395,19 +459,24 @@ def perform_MCMC_fit(
         sampler = emcee.EnsembleSampler(
             nwalkers, ndim, 
             get_log_probability, 
-            args=(r_list, Vtot_data, Verr), a=3
+            args=(r_list, Vtot_data, Verr),
+            a=3,
         )
 
         samples = sampler.run_mcmc(
-            initial_state=pos, nsteps=10000, progress=True
+            initial_state=pos, nsteps=1000, progress=True
+            # initial_state=pos, nsteps=10000, progress=True
         )
 
-    samples = sampler.chain[:, 1000:, :].reshape((-1, ndim))
-    sampler_chain = sampler.get_chain(discard=1000)
+    # samples = sampler.chain[:, 1000:, :].reshape((-1, ndim))
+    # sampler_chain = sampler.get_chain(discard=1000)
+    samples = sampler.chain[:, 100:, :].reshape((-1, ndim))
+    sampler_chain = sampler.get_chain(discard=100)
     labels = ["$\\log_{10}(M_{halo})$", "$c_{vir}$", "$\\Upsilon_{*}$"]
     
     plt.clf()
     fig, axes = plt.subplots(ndim, sharex=True, figsize=(8, 9))
+    
     for i in range(ndim):
         ax = axes[i]
         ax.plot(sampler_chain[:, :, i], "k", alpha=0.4)
@@ -415,6 +484,7 @@ def perform_MCMC_fit(
         ax.set_ylabel(labels[i])
         ax.set_xlabel("step number")
         ax.yaxis.set_label_coords(-0.1, 0.5)
+
     fig.tight_layout(h_pad=0.0)
     fig = corner.corner(samples, labels=["$\\log_{10}(M_{halo})$", "$c_{vir}$", "$\\Upsilon_{*}$"], show_titles=True, quantiles=[ 0.16, 0.5, 0.84], title_quantiles=[0.16, 0.5, 0.84])  # median and 1 sigma percentiles
     fig.savefig(f"{model}_{galaxy_name}_{output_figure_name}")
@@ -453,6 +523,7 @@ def generate_MCMC_files(
     # time you call it, so it's really slow. 
     # Replaced it with fixed-length arrays we access using indexes.        
     num_galaxies: int = len(galaxy_names)
+
     Mh: NDArray = np.zeros(num_galaxies)
     H_max: NDArray = np.zeros_like(Mh) 
     H_min: NDArray = np.zeros_like(Mh)
@@ -505,12 +576,12 @@ def generate_MCMC_files(
 
 
 # model = "NFW"
-# output_file_name = "MCMC_Katz.txt"
+# output_file_name = "MCMC_Katz"
 
 model = "DC14"
-output_file_name = "DC14_MCMC_MCMC_speedtest.txt"
+output_file_name = "MCMC_speedtest"
 
-num_threads = 4
+num_threads = 8
 
 generate_MCMC_files(
     galaxy_names=galaxy_names, 
