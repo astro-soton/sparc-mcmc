@@ -25,24 +25,35 @@ plt.rc('font', family='serif')
 from scipy.optimize import brentq,minimize
 from multiprocessing import Pool
 
+from pathlib import Path
+
 ###############################################################################
 ## DATA ##
 ###############################################################################
 
 # Read in SPARC rotation curve data
-names = np.loadtxt("rotationCurvesSPARC.txt",
-                   dtype=str, unpack=True, usecols=(0))
-R, Vobs, e_Vobs, Vg, Vs, Vb = np.loadtxt("rotationCurvesSPARC.txt", dtype=float, unpack=True, usecols=(
-    2, 3, 4, 5, 6, 7))  # Radial points, and individual rotational velocity components
+names = np.loadtxt(
+    Path("data/rotationCurvesSPARC.txt"),  # Without 'Path' directories work differently on Windows/Linux
+    dtype=str, unpack=True, usecols=(0)
+)
+R, Vobs, e_Vobs, Vg, Vs, Vb = np.loadtxt(
+    str(Path("data/rotationCurvesSPARC.txt")),
+    dtype=float, unpack=True, usecols=(2, 3, 4, 5, 6, 7)
+)  # Radial points, and individual rotational velocity components
 
 
 def SPARC1(galaxy_names):
     # extract photometry data for a given galaxy in the SPARC sample
     # returns:
     # Inc = inclination, Lum = total 3.6 micron luminosity, e_Lum = Luminosity error, SBright = surface brightness, HImass = Ionised hydrogen mass, Q = quality factor
-    names = np.loadtxt("centralLumSPARC.txt", dtype=str,
-                       unpack=True, usecols=(0))
-    I, L, e_L, r, SB, MHI, QF = np.loadtxt("centralLumSPARC.txt", dtype = float, unpack = True, usecols = (5, 7, 8, 11, 12, 13, 17))
+    names = np.loadtxt(
+        Path("data/centralLumSPARC.txt"), 
+        dtype=str, unpack=True, usecols=(0)
+    )
+    I, L, e_L, r, SB, MHI, QF = np.loadtxt(
+        Path("data/centralLumSPARC.txt"), 
+        dtype=float, unpack=True, usecols=(5, 7, 8, 11, 12, 13, 17)
+    )
     Lum = np.array([])
     e_Lum = np.array([])
     SBright = np.array([])
@@ -111,18 +122,24 @@ def TF():
     # Extract Tully-Fisher Data
     # returns:
     # TF_names = names of galaxies in TF data, TF_M = log total baryonic mass, TF_V = flat rotational velocity
-    TF_names = np.loadtxt('baryonic Tully-Fisher relation.txt',
-                          dtype=str, unpack=True, usecols=(0))
+    TF_names = np.loadtxt(
+        Path('data/baryonic Tully-Fisher relation.txt'),
+        dtype=str, unpack=True, usecols=(0)
+    )
     TF_M, TF_V = np.loadtxt(
-        'baryonic Tully-Fisher relation.txt', dtype=float, unpack=True, usecols=(1, 11))
+        Path('data/baryonic Tully-Fisher relation.txt'), 
+        dtype=float, unpack=True, usecols=(1, 11)
+    )
     return TF_names, TF_M, TF_V
 
 ###############################################################################
 ## GLOBAL VALUES ##
 ###############################################################################
 
-
-galaxy_names = np.loadtxt("FinalGalaxySample.txt", dtype=str)
+# SWM 11/11/24: Added `ndmin` or it thinks 1-long lists of names are 0-dimensional
+galaxy_names = np.loadtxt(
+    Path("data/FinalGalaxySample.txt"), dtype=str, ndmin=1
+)
 Inc, Lum, e_Lum, r0, SBright, HImass, Q = SPARC1(galaxy_names)
 r_list, Vtot_data, Verr, Vgas, Vstar, Vbulge = RC(galaxy_names)
 TF_names, TF_M, TF_V = TF()
@@ -270,7 +287,9 @@ def opline(galaxy_name, plot=True):
                      color="gray", linestyle='--')
             ax2.set_xlabel("Radius - kpc", fontsize=15)
             ax2.set_ylabel("Residuals - km/s", fontsize=15)
-            fig.savefig(model + galaxy_name + " Rotation Curve LSF")
+            fig.savefig(
+                Path("results/" + model + galaxy_name + " Rotation Curve LSF")
+            )
             plt.show()
     if model == 'NFW' or model == 'DC14':
         return popt, max(Vtot_calc(r_list, *popt)), np.sqrt(np.diag(pcov))
@@ -342,7 +361,9 @@ def MCMC_Fit():
         ax.yaxis.set_label_coords(-0.1, 0.5)
     fig.tight_layout(h_pad=0.0)
     fig = corner.corner(samples, labels=["$\\log_{10}(M_{halo})$", "$c_{vir}$", "$\\Upsilon_{*}$"], show_titles=True, quantiles=[ 0.16, 0.5, 0.84], title_quantiles=[0.16, 0.5, 0.84])  # median and 1 sigma percentiles
-    fig.savefig(model + galaxy_name + " MCMC - Speeadtest")
+    fig.savefig(
+        Path("results/" + model + galaxy_name + " MCMC - Speeadtest")
+    )
     plt.show()
     logMh, c, ML = map(lambda v: (v[1], v[2]-v[1], v[1]-v[0]), zip(*np.percentile(sampler.flatchain, [16, 50, 84], axis=0)))
     return logMh, c, ML  # MCMC parameter estimates
@@ -386,11 +407,15 @@ def MCMC_files(galaxy_names):
                 c_max, cmax), np.append(c_min, cmin)
             ML, ML_max, ML_min = np.append(ML, MLest), np.append(
                 ML_max, MLmax), np.append(ML_min, MLmin)
-            file = open("NFW_MCMC_Katz.txt", "w")
+            file = open(
+                Path("results/NFW_MCMC_Katz.txt"), "w"
+            )
             content = np.column_stack(
                 (Mh, H_max, H_min, c, c_max, c_min, ML, ML_max, ML_min))
-            np.savetxt("NFW_MCMC_Katz.txt",
-                       content, fmt='%.18e', delimiter=' ')
+            np.savetxt(
+                Path("results/NFW_MCMC_Katz.txt"),
+                content, fmt='%.18e', delimiter=' '
+            )
             file.close()
         elif model == "DC14":
             mcmc = MCMC_Fit()
@@ -404,11 +429,15 @@ def MCMC_files(galaxy_names):
                 c_max, cmax), np.append(c_min, cmin)
             ML, ML_max, ML_min = np.append(ML, MLest), np.append(
                 ML_max, MLmax), np.append(ML_min, MLmin)
-            file = open("DC14_MCMC_MCMC_speedtest.txt", "w")
+            file = open(
+                Path("results/DC14_MCMC_MCMC_speedtest.txt"), "w"
+            )
             content = np.column_stack(
                 (Mh, H_max, H_min, c, c_max, c_min, ML, ML_max, ML_min))
-            np.savetxt("DC14_MCMC_MCMC_speeadtest.txt",
-                       content, fmt='%.18e', delimiter=' ')
+            np.savetxt(
+                Path("results/DC14_MCMC_MCMC_speeadtest.txt"),
+                content, fmt='%.18e', delimiter=' '
+            )
             file.close()
     
 
